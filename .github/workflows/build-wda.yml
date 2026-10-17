@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# 关键：默认 GITHUB_TOKEN 对新建仓库是只读的，
+# 不显式申请 write 权限，Create Release 一定失败。
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -72,8 +77,10 @@ jobs:
           retention-days: 30
 
       - name: Create Release
+        # 发 Release 只是附赠便利；失败也不该把整次构建标红
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: wda-${{ github.run_number }}
           name: WebDriverAgent Build ${{ github.run_number }}
