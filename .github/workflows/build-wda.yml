@@ -1,0 +1,96 @@
+name: Build WebDriverAgent IPA
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone WebDriverAgent
+        run: |
+          git clone https://github.com/appium/WebDriverAgent.git
+          cd WebDriverAgent
+          git fetch --tags
+          echo "WDA Version: $(git describe --tags --always)"
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Build WebDriverAgent for iOS Device
+        run: |
+          cd WebDriverAgent
+
+          # 针对真机编译（不签名，后续用 Sideloadly 自签）
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -allowProvisioningUpdates
+
+      - name: Find and Package App
+        run: |
+          cd WebDriverAgent
+
+          APP_PATH=$(find ./build -name "WebDriverAgentRunner-Runner.app" -type d | head -1)
+          echo "Found app at: $APP_PATH"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "App not found, listing build directory:"
+            find ./build -name "*.app" -type d
+            exit 1
+          fi
+
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+
+          zip -r WebDriverAgent.ipa Payload
+
+          echo "IPA created successfully!"
+          ls -la WebDriverAgent.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgent-IPA
+          path: WebDriverAgent/WebDriverAgent.ipa
+          retention-days: 30
+
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: wda-${{ github.run_number }}
+          name: WebDriverAgent Build ${{ github.run_number }}
+          files: WebDriverAgent/WebDriverAgent.ipa
+          body: |
+            ## WebDriverAgent IPA
+
+            Built from appium/WebDriverAgent
+
+            ### Installation:
+            1. Download `WebDriverAgent.ipa`
+            2. Open Sideloadly
+            3. Drag the IPA into Sideloadly
+            4. Enter your Apple ID
+            5. Click Start
+
+            ### After Installation:
+            - Trust the app: Settings > General > VPN & Device Management
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
